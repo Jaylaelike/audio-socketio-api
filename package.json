@@ -1,0 +1,32 @@
+{
+  "name": "demo-ws-audio-stream",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "nodemon app.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@dropb/ffprobe": "^3.0.0",
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "ffprobe-static": "^3.1.0",
+    "hls.js": "^1.5.6",
+    "jnaudiostream": "^1.0.2",
+    "lamejs": "^1.2.1",
+    "nodemon": "^3.0.3",
+    "react-feather": "^2.0.10",
+    "react-router-dom": "^6.22.0",
+    "socket.io": "^4.7.4",
+    "socket.io-client": "^4.7.4",
+    "throttle": "^1.0.3",
+    "tone": "^14.8.49",
+    "uuid": "^9.0.1",
+    "websocket": "^1.0.34",
+    "ws": "^8.16.0"
+  }
+}
