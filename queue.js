@@ -1,13 +1,14 @@
 import { v4 as uuid } from "uuid";
 import { PassThrough } from "stream";
-import Throttle from "throttle";
+// import { Throttle } from "throttle"; 
+import pkg from 'throttle';
+const { Throttle } = pkg; // Add import statement for Throttle
 import { ffprobe } from "@dropb/ffprobe";
 import ffprobeStatic from "ffprobe-static";
 import { readdir } from "fs/promises";
 import { createReadStream } from "fs";
 import { extname, join } from "path";
 
-import WebSocket from "ws";
 
 ffprobe.path = ffprobeStatic.path;
 
@@ -16,7 +17,12 @@ class Queue {
     this.tracks = [];
     this.index = 0;
     this.clients = new Map();
-    this.bufferHeader = null;
+
+    this.bufferHeader = {
+      sampleRate: 44100,
+      channels: 1,
+      bitDepth: 16,
+    };
   }
 
   current() {
@@ -32,6 +38,32 @@ class Queue {
   addClient() {
     const id = uuid();
     const client = new PassThrough();
+    // Write buffer header to the client
+    const header = Buffer.alloc(44); // 44-byte WAV header
+    header.write("RIFF", 0); // ChunkID
+    header.writeUInt32LE(36, 4); // ChunkSize
+    header.write("WAVE", 8); // Format
+    header.write("fmt ", 12); // Subchunk1ID
+    header.writeUInt32LE(16, 16); // Subchunk1Size
+    header.writeUInt16LE(1, 20); // AudioFormat
+    header.writeUInt16LE(this.bufferHeader.channels, 22); // NumChannels
+    header.writeUInt32LE(this.bufferHeader.sampleRate, 24); // SampleRate
+    header.writeUInt32LE(
+      (this.bufferHeader.sampleRate *
+        this.bufferHeader.channels *
+        this.bufferHeader.bitDepth) /
+        8,
+      28
+    ); // ByteRate
+    header.writeUInt16LE(
+      (this.bufferHeader.channels * this.bufferHeader.bitDepth) / 8,
+      32
+    ); // BlockAlign
+    header.writeUInt16LE(this.bufferHeader.bitDepth, 34); // BitsPerSample
+    header.write("data", 36); // Subchunk2ID
+    header.writeUInt32LE(0, 40); // Subchunk2Size
+
+    client.write(header);
 
     this.clients.set(id, client);
     return { id, client };
@@ -42,42 +74,43 @@ class Queue {
   }
 
   async loadTracks(dir) {
-    let filenames = await readdir(dir);
-    filenames = filenames.filter((filename) => extname(filename) === ".wav");
+    try {
+      let filenames = await readdir(dir);
+      filenames = filenames.filter((filename) => extname(filename) === ".wav");
 
-    // Add directory name back to filenames
-    const filepaths = filenames.map((filename) => join(dir, filename));
+      // Add directory name back to filenames
+      const filepaths = filenames.map((filename) => join(dir, filename));
 
-    const promises = filepaths.map(async (filepath) => {
-      const bitrate = await this.getTrackBitrate(filepath);
+      const promises = filepaths.map(async (filepath) => {
+        const bitrate = await this.getTrackBitrate(filepath);
 
-      return { filepath, bitrate };
-    });
+        return { filepath, bitrate };
+      });
 
-    this.tracks = await Promise.all(promises);
-    console.log(`Loaded ${this.tracks.length} tracks`);
+      this.tracks = await Promise.all(promises);
+      console.log(`Loaded ${this.tracks.length} tracks`);
+    } catch (error) {
+      console.error("Error loading tracks:", error);
+    }
   }
 
   async getTrackBitrate(filepath) {
     const data = await ffprobe(filepath);
     const bitrate = data?.format?.bit_rate;
 
-    console.log(`Bitrate for ${filepath}: ${bitrate}`);
-
     return bitrate ? parseInt(bitrate) : 128000;
   }
 
   getNextTrack() {
     // Loop back to the first track
-
-    if (this.index === this.tracks.length - 1) {
+    if (this.index >= this.tracks.length - 1) {
       this.index = 0;
-    } else {
-      this.index++;
     }
-    this.currentTrack = this.current();
 
-    console.log(`Now playing: ${this.currentTrack.filepath}`);
+    const track = this.tracks[this.index++];
+    this.currentTrack = track;
+
+    return track;
   }
 
   pause() {
@@ -112,33 +145,12 @@ class Queue {
   }
 
   // Get the stream from the filepath
-//   loadTrackStream() {
-//       const track = this.currentTrack;
-//       if (!track) return;
-
-//       console.log("Starting audio stream");
-//       this.stream = createReadStream(track.filepath);
-//   }
-
-  //Get the stream from websocket
   loadTrackStream() {
-    // const track = this.currentTrack;
-    // if (!track) return;
+    const track = this.currentTrack;
+    if (!track) return;
 
     console.log("Starting audio stream");
-    const ws = new WebSocket("ws://10.8.0.102:8888");
-    ws.on("open", function open() {
-      ws.send("something");
-    });
-
-    ws.on("message", function incoming(data) {
-      // Here you should handle the incoming audio data
-      // convert data to audio with lamejs stream and play
-
-      console.log("stream", data);
-    });
-
-    this.stream = new PassThrough();
+    this.stream = createReadStream(track.filepath);
   }
 
   // Start broadcasting audio stream
@@ -147,7 +159,7 @@ class Queue {
     if (!track) return;
 
     this.playing = true;
-    this.throttle = new Throttle(track.bitrate / 8);
+    this.throttle = new pkg(track.bitrate / 8);
 
     this.stream
       .pipe(this.throttle)
@@ -156,6 +168,5 @@ class Queue {
       .on("error", () => this.play(true));
   }
 }
-
 const queue = new Queue();
 export default queue;
